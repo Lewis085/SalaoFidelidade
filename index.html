@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fidelidade Salão</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen antialiased">
+  <div id="app" class="hidden max-w-2xl mx-auto px-4 py-6 sm:py-10">
+    <!-- Cabeçalho -->
+    <header class="mb-6 flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
+          Fidelidade Salão
+        </h1>
+        <p class="text-sm text-slate-500 mt-1">
+          Acompanhe as visitas • 10 visitas = 1 brinde
+        </p>
+      </div>
+      <span
+        id="total-clientes"
+        class="text-xs font-medium bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-full shadow-sm"
+      >
+        0 clientes
+      </span>
+    </header>
+
+    <!-- Formulário de cadastro -->
+    <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-6">
+      <form id="form-cliente" class="flex flex-col sm:flex-row gap-3">
+        <label for="input-nome" class="sr-only">Nome da cliente</label>
+        <input
+          id="input-nome"
+          type="text"
+          required
+          autocomplete="off"
+          placeholder="Nome da cliente..."
+          class="flex-1 rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-base text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10 transition"
+        />
+        <button
+          id="btn-adicionar"
+          type="submit"
+          class="rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
+        >
+          Adicionar Cliente
+        </button>
+      </form>
+    </section>
+
+    <!-- Mensagens de status / aviso -->
+    <div id="status-mensagem" class="hidden mb-4 rounded-xl px-4 py-3 text-sm font-medium"></div>
+
+    <!-- Lista de clientes -->
+    <main>
+      <div id="lista-clientes" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+    </main>
+  </div>
+
+  <script>
+    const SENHA_ACESSO = '1234';
+    const META_VISITAS = 10;
+
+    // Substitua pelos dados do seu projeto no Supabase
+    const SUPABASE_URL = 'SUA_URL_AQUI';
+    const SUPABASE_KEY = 'SUA_CHAVE_AQUI';
+
+    let supabaseClient = null;
+
+    const appEl = document.getElementById('app');
+    const formEl = document.getElementById('form-cliente');
+    const inputNomeEl = document.getElementById('input-nome');
+    const btnAdicionarEl = document.getElementById('btn-adicionar');
+    const listaEl = document.getElementById('lista-clientes');
+    const statusEl = document.getElementById('status-mensagem');
+    const totalClientesEl = document.getElementById('total-clientes');
+
+    function exibirStatus(mensagem, tipo = 'info') {
+      const estilos = {
+        info: 'bg-slate-100 text-slate-700 border border-slate-200',
+        erro: 'bg-red-50 text-red-700 border border-red-200',
+        aviso: 'bg-amber-50 text-amber-800 border border-amber-200'
+      };
+      statusEl.className = `mb-4 rounded-xl px-4 py-3 text-sm font-medium ${estilos[tipo] || estilos.info}`;
+      statusEl.textContent = mensagem;
+      statusEl.classList.remove('hidden');
+    }
+
+    function limparStatus() {
+      statusEl.classList.add('hidden');
+      statusEl.textContent = '';
+    }
+
+    function inicializarSupabase() {
+      if (
+        !SUPABASE_URL ||
+        SUPABASE_URL === 'SUA_URL_AQUI' ||
+        !SUPABASE_KEY ||
+        SUPABASE_KEY === 'SUA_CHAVE_AQUI'
+      ) {
+        exibirStatus(
+          'Configure SUA_URL_AQUI e SUA_CHAVE_AQUI no arquivo index.html para conectar ao Supabase.',
+          'aviso'
+        );
+        return false;
+      }
+
+      try {
+        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        return true;
+      } catch (err) {
+        exibirStatus('Erro ao inicializar Supabase: ' + err.message, 'erro');
+        return false;
+      }
+    }
+
+    function renderizarClientes(clientes) {
+      listaEl.innerHTML = '';
+      const quantidade = clientes.length;
+      totalClientesEl.textContent = `${quantidade} ${quantidade === 1 ? 'cliente' : 'clientes'}`;
+
+      if (quantidade === 0) {
+        const vazio = document.createElement('div');
+        vazio.className =
+          'col-span-full bg-white border border-dashed border-slate-300 rounded-2xl p-8 text-center text-sm text-slate-500';
+        vazio.textContent = 'Nenhuma cliente cadastrada ainda. Adicione a primeira acima.';
+        listaEl.appendChild(vazio);
+        return;
+      }
+
+      clientes.forEach((cliente) => {
+        const visitas = Number(cliente.visitas) || 0;
+        const atingiuMeta = visitas >= META_VISITAS;
+
+        const card = document.createElement('article');
+        card.className = atingiuMeta
+          ? 'rounded-2xl border-2 border-emerald-400 bg-emerald-50 p-4 shadow-sm flex flex-col justify-between gap-4 transition'
+          : 'rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col justify-between gap-4 transition';
+
+        const topo = document.createElement('div');
+        topo.className = 'flex items-start justify-between gap-3';
+
+        const info = document.createElement('div');
+        info.className = 'min-w-0';
+
+        const nomeEl = document.createElement('h2');
+        nomeEl.className = 'font-semibold text-base text-slate-900 truncate';
+        nomeEl.textContent = cliente.nome;
+
+        const contagemEl = document.createElement('p');
+        contagemEl.className = atingiuMeta
+          ? 'text-sm font-medium text-emerald-700 mt-0.5'
+          : 'text-sm font-medium text-slate-500 mt-0.5';
+        contagemEl.textContent = `${visitas}/${META_VISITAS} visitas`;
+
+        info.appendChild(nomeEl);
+        info.appendChild(contagemEl);
+
+        const btnMaisUm = document.createElement('button');
+        btnMaisUm.type = 'button';
+        btnMaisUm.textContent = '+1';
+        btnMaisUm.disabled = atingiuMeta;
+        btnMaisUm.setAttribute('aria-label', `Adicionar visita para ${cliente.nome}`);
+        btnMaisUm.className = atingiuMeta
+          ? 'shrink-0 rounded-xl bg-emerald-200 text-emerald-700 px-4 py-2.5 text-sm font-bold cursor-not-allowed opacity-70'
+          : 'shrink-0 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-95 text-white px-4 py-2.5 text-sm font-bold shadow-sm transition cursor-pointer';
+
+        btnMaisUm.addEventListener('click', async () => {
+          btnMaisUm.disabled = true;
+          await marcarVisita(cliente.id, visitas);
+        });
+
+        topo.appendChild(info);
+        topo.appendChild(btnMaisUm);
+
+        const rodape = document.createElement('div');
+        rodape.className = 'space-y-2';
+
+        const barraFundo = document.createElement('div');
+        barraFundo.className = atingiuMeta
+          ? 'w-full h-2 rounded-full bg-emerald-200 overflow-hidden'
+          : 'w-full h-2 rounded-full bg-slate-100 overflow-hidden';
+
+        const barraPreenchimento = document.createElement('div');
+        const percentual = Math.min(100, Math.round((visitas / META_VISITAS) * 100));
+        barraPreenchimento.style.width = `${percentual}%`;
+        barraPreenchimento.className = atingiuMeta
+          ? 'h-full rounded-full bg-emerald-600 transition-all duration-300'
+          : 'h-full rounded-full bg-slate-900 transition-all duration-300';
+
+        barraFundo.appendChild(barraPreenchimento);
+        rodape.appendChild(barraFundo);
+
+        if (atingiuMeta) {
+          const badge = document.createElement('p');
+          badge.className =
+            'inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-emerald-800 bg-emerald-100 border border-emerald-300 rounded-lg px-2.5 py-1';
+          badge.textContent = 'Ganhou brinde!';
+          rodape.appendChild(badge);
+        }
+
+        card.appendChild(topo);
+        card.appendChild(rodape);
+        listaEl.appendChild(card);
+      });
+    }
+
+    async function carregarClientes() {
+      if (!supabaseClient) return;
+
+      limparStatus();
+      const { data, error } = await supabaseClient
+        .from('clientes')
+        .select('id, nome, visitas')
+        .order('nome', { ascending: true });
+
+      if (error) {
+        exibirStatus('Erro ao carregar clientes: ' + error.message, 'erro');
+        return;
+      }
+
+      renderizarClientes(data || []);
+    }
+
+    async function adicionarCliente(nome) {
+      const nomeLimpo = nome.trim();
+      if (!nomeLimpo || !supabaseClient) return;
+
+      btnAdicionarEl.disabled = true;
+      limparStatus();
+
+      const { error } = await supabaseClient
+        .from('clientes')
+        .insert([{ nome: nomeLimpo, visitas: 0 }]);
+
+      btnAdicionarEl.disabled = false;
+
+      if (error) {
+        exibirStatus('Erro ao adicionar cliente: ' + error.message, 'erro');
+        return;
+      }
+
+      inputNomeEl.value = '';
+      inputNomeEl.focus();
+      await carregarClientes();
+    }
+
+    async function marcarVisita(id, visitasAtuais) {
+      if (!supabaseClient || visitasAtuais >= META_VISITAS) return;
+
+      limparStatus();
+      const novasVisitas = visitasAtuais + 1;
+
+      const { error } = await supabaseClient
+        .from('clientes')
+        .update({ visitas: novasVisitas })
+        .eq('id', id);
+
+      if (error) {
+        exibirStatus('Erro ao marcar visita: ' + error.message, 'erro');
+        await carregarClientes();
+        return;
+      }
+
+      await carregarClientes();
+    }
+
+    formEl.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      await adicionarCliente(inputNomeEl.value);
+    });
+
+    // Bloqueio de segurança simples ao abrir a página
+    (function iniciar() {
+      const senhaDigitada = prompt('Digite a senha para acessar:');
+      if (senhaDigitada !== SENHA_ACESSO) {
+        document.body.innerHTML = '';
+        document.body.className = 'bg-white';
+        return;
+      }
+
+      appEl.classList.remove('hidden');
+      if (inicializarSupabase()) {
+        carregarClientes();
+      }
+    })();
+  </script>
+</body>
+</html>
