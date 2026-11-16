@@ -115,6 +115,13 @@
       }
     }
 
+    function obterDataHoje() {
+      return new Date().toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit'
+      });
+    }
+
     function criarBotaoAcaoSecundaria(texto, ariaLabel, classeExtra, aoClicar) {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -123,6 +130,31 @@
       btn.className = `inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${classeExtra}`;
       btn.addEventListener('click', aoClicar);
       return btn;
+    }
+
+    function criarGradeCarimbos(historico, atingiuMeta) {
+      const grade = document.createElement('div');
+      grade.className = 'grid grid-cols-5 gap-1.5';
+
+      for (let i = 0; i < META_VISITAS; i += 1) {
+        const carimbo = historico[i];
+        const preenchido = typeof carimbo === 'string' && carimbo.length > 0;
+
+        const slot = document.createElement('div');
+        slot.className = preenchido
+          ? atingiuMeta
+            ? 'h-10 rounded-xl bg-emerald-600 border border-emerald-700 text-white flex items-center justify-center text-[11px] font-semibold tracking-tight shadow-xs select-none'
+            : 'h-10 rounded-xl bg-slate-900 border border-slate-900 text-white flex items-center justify-center text-[11px] font-semibold tracking-tight shadow-xs select-none'
+          : atingiuMeta
+            ? 'h-10 rounded-xl bg-emerald-100/70 border border-dashed border-emerald-300 text-emerald-500 flex items-center justify-center text-[11px] font-medium select-none'
+            : 'h-10 rounded-xl bg-slate-100 border border-dashed border-slate-300 text-slate-400 flex items-center justify-center text-[11px] font-medium select-none';
+
+        slot.textContent = preenchido ? carimbo : String(i + 1);
+        slot.title = preenchido ? `Visita ${i + 1}: ${carimbo}` : `Visita ${i + 1}: pendente`;
+        grade.appendChild(slot);
+      }
+
+      return grade;
     }
 
     function renderizarClientes(clientes) {
@@ -140,7 +172,10 @@
       }
 
       clientes.forEach((cliente) => {
-        const visitas = Number(cliente.visitas) || 0;
+        const historico = Array.isArray(cliente.historico_visitas)
+          ? cliente.historico_visitas
+          : [];
+        const visitas = historico.length;
         const atingiuMeta = visitas >= META_VISITAS;
 
         const card = document.createElement('article');
@@ -178,36 +213,22 @@
 
         btnMaisUm.addEventListener('click', async () => {
           btnMaisUm.disabled = true;
-          await marcarVisita(cliente.id, visitas);
+          await marcarVisita(cliente.id, historico);
         });
 
         topo.appendChild(info);
         topo.appendChild(btnMaisUm);
 
-        const progressoWrap = document.createElement('div');
-        progressoWrap.className = 'space-y-2';
-
-        const barraFundo = document.createElement('div');
-        barraFundo.className = atingiuMeta
-          ? 'w-full h-2 rounded-full bg-emerald-200 overflow-hidden'
-          : 'w-full h-2 rounded-full bg-slate-100 overflow-hidden';
-
-        const barraPreenchimento = document.createElement('div');
-        const percentual = Math.min(100, Math.round((visitas / META_VISITAS) * 100));
-        barraPreenchimento.style.width = `${percentual}%`;
-        barraPreenchimento.className = atingiuMeta
-          ? 'h-full rounded-full bg-emerald-600 transition-all duration-300'
-          : 'h-full rounded-full bg-slate-900 transition-all duration-300';
-
-        barraFundo.appendChild(barraPreenchimento);
-        progressoWrap.appendChild(barraFundo);
+        const cartaoWrap = document.createElement('div');
+        cartaoWrap.className = 'space-y-2.5';
+        cartaoWrap.appendChild(criarGradeCarimbos(historico, atingiuMeta));
 
         if (atingiuMeta) {
           const badge = document.createElement('p');
           badge.className =
             'inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-emerald-800 bg-emerald-100 border border-emerald-300 rounded-lg px-2.5 py-1';
           badge.textContent = 'Ganhou brinde!';
-          progressoWrap.appendChild(badge);
+          cartaoWrap.appendChild(badge);
         }
 
         const acoesSecundarias = document.createElement('div');
@@ -233,7 +254,7 @@
           `Editar visitas de ${cliente.nome}`,
           classeNeutra,
           async () => {
-            await editarVisitas(cliente.id, visitas);
+            await editarVisitas(cliente.id, historico);
           }
         );
 
@@ -251,7 +272,7 @@
         acoesSecundarias.appendChild(btnExcluir);
 
         card.appendChild(topo);
-        card.appendChild(progressoWrap);
+        card.appendChild(cartaoWrap);
         card.appendChild(acoesSecundarias);
         listaEl.appendChild(card);
       });
@@ -263,7 +284,7 @@
       limparStatus();
       const { data, error } = await supabaseClient
         .from('clientes')
-        .select('id, nome, visitas')
+        .select('id, nome, visitas, historico_visitas')
         .order('nome', { ascending: true });
 
       if (error) {
@@ -283,7 +304,7 @@
 
       const { error } = await supabaseClient
         .from('clientes')
-        .insert([{ nome: nomeLimpo, visitas: 0 }]);
+        .insert([{ nome: nomeLimpo, visitas: 0, historico_visitas: [] }]);
 
       btnAdicionarEl.disabled = false;
 
@@ -297,15 +318,19 @@
       await carregarClientes();
     }
 
-    async function marcarVisita(id, visitasAtuais) {
-      if (!supabaseClient || visitasAtuais >= META_VISITAS) return;
+    async function marcarVisita(id, historicoAtual) {
+      const historico = Array.isArray(historicoAtual) ? historicoAtual : [];
+      if (!supabaseClient || historico.length >= META_VISITAS) return;
 
       limparStatus();
-      const novasVisitas = visitasAtuais + 1;
+      const novoHistorico = [...historico, obterDataHoje()];
 
       const { error } = await supabaseClient
         .from('clientes')
-        .update({ visitas: novasVisitas })
+        .update({
+          historico_visitas: novoHistorico,
+          visitas: novoHistorico.length
+        })
         .eq('id', id);
 
       if (error) {
@@ -345,8 +370,11 @@
       await carregarClientes();
     }
 
-    async function editarVisitas(id, visitasAtuais) {
+    async function editarVisitas(id, historicoAtual) {
       if (!supabaseClient) return;
+
+      const historico = Array.isArray(historicoAtual) ? historicoAtual : [];
+      const visitasAtuais = historico.length;
 
       const entrada = prompt('Defina o número exato de visitas (0 a 10):', visitasAtuais);
       if (entrada === null) return;
@@ -365,10 +393,18 @@
 
       if (novasVisitas === visitasAtuais) return;
 
+      const novoHistorico =
+        novasVisitas > visitasAtuais
+          ? [...historico, ...Array(novasVisitas - visitasAtuais).fill('M')]
+          : historico.slice(0, novasVisitas);
+
       limparStatus();
       const { error } = await supabaseClient
         .from('clientes')
-        .update({ visitas: novasVisitas })
+        .update({
+          historico_visitas: novoHistorico,
+          visitas: novoHistorico.length
+        })
         .eq('id', id);
 
       if (error) {
